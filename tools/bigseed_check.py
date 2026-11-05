@@ -20,8 +20,8 @@ SEED0 = 11 + 7_000_000 * 1000003     # far from every seed set used so far
 
 
 def sd_chunk(job):
-    k, acts, turns, n, start = job
-    M.init((), True)
+    k, acts, turns, n, start, req = job
+    M.init(req, True)
     texts, turn, calls, _ = E.make_position(k)
     ex = E.build("exact", texts, turn, calls)
     acts = [[tuple(a) for a in side] for side in acts]
@@ -41,13 +41,15 @@ def main():
     ap.add_argument("--turns", type=int, default=5)
     ap.add_argument("--n", type=int, default=20000)
     ap.add_argument("--procs", type=int, default=4)
+    ap.add_argument("--require", default="", help="(2026-11-05) the --require ids the case was made with (multi_turn_truth)")
     a = ap.parse_args()
     r = next(x for x in json.load(open(a.out))["flagged"] if x["k"] == a.k)
     per = a.n // a.procs
-    jobs = [(a.k, r["acts"], a.turns, per, j * per) for j in range(a.procs)]
+    req = tuple(x for x in a.require.split(",") if x)
+    jobs = [(a.k, r["acts"], a.turns, per, j * per, req) for j in range(a.procs)]
     with mp.Pool(a.procs) as pool:
         res = pool.map_async(sd_chunk, jobs)
-        M.init((), True)
+        M.init(req, True)
         texts, turn, calls, _ = E.make_position(a.k)
         old = E.build("old", texts, turn, calls)
         fo = M.play_fast(old, [[tuple(x) for x in s] for s in r["acts"]], a.turns, per * a.procs)

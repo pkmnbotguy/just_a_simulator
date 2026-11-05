@@ -39,8 +39,9 @@ BENCH = [AGGRON, CORVIKNIGHT]
 BENCH_B = [SKARMORY, GARGANACL]
 
 
-def S(name, why, a, b, script, calls=(), expect=None, turn=3):
-    return {"name": name, "why": why, "a": a, "b": b, "script": script, "calls": list(calls), "expect": expect, "turn": turn}
+def S(name, why, a, b, script, calls=(), expect=None, turn=3, ill_ok=False):
+    # ill_ok: the fast engine refuses a scripted choice that Showdown accepts and turns into Struggle (Champions Fake Out)
+    return {"name": name, "why": why, "a": a, "b": b, "script": script, "calls": list(calls), "expect": expect, "turn": turn, "ill_ok": ill_ok}
 
 
 SCENARIOS = [
@@ -371,6 +372,44 @@ SCENARIOS = [
       [["Stealth Rock", "Calm Mind"], ["Curse", "Protect"], ["Protect", "Calm Mind"], ["switch 4", "switch 3"],
        ["Protect", "Calm Mind"], ["Iron Defense", "Roost"]],
       expect=r"Stealth Rock"),
+    # (2026-11-05) from another bot maker's report on just_a_simulator (their Showdown pin is older than ours)
+    S("fakeout_onemove_turn2", "a Pokemon whose only move is Fake Out, past its first turn",
+      [mon("Incineroar", "Sitrus Berry", "Intimidate", ["Fake Out"]), CRESSELIA] + BENCH,
+      [SNORLAX, mon("Hippowdon", "Leftovers", "Sand Stream", ["Slack Off", "Earthquake", "Protect", "Yawn"])] + BENCH_B,
+      [["Fake Out>1", "Calm Mind"], ["Curse", "Slack Off"], ["Fake Out>1", "Calm Mind"], ["Curse", "Slack Off"]],
+      expect=r"\|move\|p1a: m0\|(Fake Out|Struggle)", ill_ok=True),
+    S("fakeout_scarf_locked_turn2", "Choice Scarf locked into Fake Out, past its first turn",
+      [mon("Incineroar", "Choice Scarf", "Intimidate", ["Fake Out", "Flare Blitz", "Knock Off", "Parting Shot"]), CRESSELIA] + BENCH,
+      [SNORLAX, mon("Hippowdon", "Leftovers", "Sand Stream", ["Slack Off", "Earthquake", "Protect", "Yawn"])] + BENCH_B,
+      [["Fake Out>1", "Calm Mind"], ["Curse", "Slack Off"], ["Fake Out>1", "Calm Mind"], ["Curse", "Slack Off"]],
+      expect=r"\|move\|p1a: m0\|(Fake Out|Struggle)", ill_ok=True),
+    S("redcard_spread_fastest", "a spread move hits two Red Card holders (the user's partner, slow; a foe, fast): the FASTER card fires",
+      [mon("Heliolisk", "Leftovers", "Dry Skin", ["Brutal Swing", "Thunderbolt", "Protect", "Volt Switch"], "32 Atk / 32 Spe / 2 HP", "Jolly"),
+       mon("Snorlax", "Red Card", "Thick Fat", ["Curse", "Body Slam", "Protect", "Rest"], "32 HP / 32 Def / 2 SpD", "Relaxed")] + BENCH,
+      [mon("Jolteon", "Red Card", "Volt Absorb", ["Protect", "Thunderbolt", "Calm Mind", "Shadow Ball"], "32 HP / 32 Spe / 2 SpD", "Timid"),
+       CRESSELIA] + BENCH_B,
+      [["Brutal Swing", "Curse"], ["Calm Mind", "Calm Mind"], ["Protect", "Body Slam>1"], ["Calm Mind", "Calm Mind"]],
+      expect=r"\|-enditem\|p2a: m0\|Red Card"),
+    S("clanging_scales_battle_end", "Clanging Scales KOs the last two foes: the battle ends, no Defense drop",
+      [mon("Kommo-o", "Leftovers", "Bulletproof", ["Clanging Scales", "Protect", "Close Combat", "Iron Defense"], "32 SpA / 32 Spe / 2 HP",
+           "Modest"), CRESSELIA] + BENCH,
+      [mon("Hippowdon", "Leftovers", "Sand Stream", ["Slack Off", "Earthquake", "Protect", "Yawn"]), SNORLAX] + BENCH_B,
+      [["Clanging Scales", "Calm Mind"], ["Slack Off", "Curse"]],
+      calls=[("set_mon", (1, 0), {"hp_frac": 0.05}), ("set_mon", (1, 1), {"hp_frac": 0.05})] + [("set_mon", (1, k), {"fainted": True}) for k in (2, 3)],
+      expect=r"\|win\|"),
+    S("clanging_scales_ko_one", "Clanging Scales KOs one foe, the battle goes on: one Defense drop",
+      [mon("Kommo-o", "Leftovers", "Bulletproof", ["Clanging Scales", "Protect", "Close Combat", "Iron Defense"], "32 SpA / 32 Spe / 2 HP",
+           "Modest"), CRESSELIA] + BENCH,
+      [mon("Hippowdon", "Leftovers", "Sand Stream", ["Slack Off", "Earthquake", "Protect", "Yawn"]), SNORLAX] + BENCH_B,
+      [["Clanging Scales", "Calm Mind"], ["Slack Off", "Curse"], ["Protect", "Calm Mind"], ["Slack Off", "Curse"]],
+      calls=[("set_mon", (1, 0), {"hp_frac": 0.05})], expect=r"\|-unboost\|p1a: m0\|def"),
+    S("scale_shot_battle_end", "Scale Shot KOs the last foe: the battle ends, no Defense drop / Speed boost",
+      [mon("Dragalge", "Life Orb", "Poison Touch", ["Scale Shot", "Protect", "Surf", "Haze"], "32 Atk / 32 Spe / 2 HP", "Jolly"),
+       CRESSELIA] + BENCH,
+      [mon("Hippowdon", "Leftovers", "Sand Stream", ["Slack Off", "Earthquake", "Protect", "Yawn"]), SNORLAX] + BENCH_B,
+      [["Scale Shot>1", "Calm Mind"], ["Slack Off", "pass"]],
+      calls=[("set_mon", (1, 0), {"hp_frac": 0.05})] + [("set_mon", (1, k), {"fainted": True}) for k in (1, 2, 3)],
+      expect=r"\|win\|"),
 ]
 
 
@@ -516,7 +555,7 @@ def main():
         status = "DIFF" if r["diffs"] else ("NOT EXERCISED" if not ok_expect else "ok")
         # an illegal choice is fine when both engines refuse the same one (e.g. a switch while trapped)
         same_ill = {(x[0], x[1]) for x in r["illegal_fast"]} == {tuple(x[:2]) for x in r["illegal_showdown"]} and not r["illegal_t1"]
-        if status != "ok" or (ill and not same_ill):
+        if status != "ok" or (ill and not same_ill and not sc.get("ill_ok")):
             bad += 1
         print(f"{status:<14}{sc['name']:<30} expect in {r['expect_seeds']}/{r['seeds']} seeds{ill}")
         for d in r["diffs"][:6]:

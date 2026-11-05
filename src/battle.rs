@@ -224,6 +224,10 @@ pub struct Battle {
     // the boost being applied was bounced by Mirror Armor (Showdown: effect = Mirror Armor, which then ignores it)
     mirror_bounce: bool,
     eject_cands: ArrayVec<(usize, usize), 4>,
+    /// Red Card holders hit by one spread move: Showdown's AfterMoveSecondary runs over all targets
+    /// at once, speed-sorted, so the fastest holder's card fires (not the first one hit)
+    card_defer: bool,
+    card_cands: ArrayVec<(usize, usize), 4>,
     /// hits that landed on the last target (Parental Bond's self drops are per hit)
     last_hits: u8,
     /// chance enumeration for the search: None = ordinary random play
@@ -414,6 +418,8 @@ impl Battle {
             boost_blocked: false,
             mirror_bounce: false,
             eject_cands: ArrayVec::new(),
+            card_defer: false,
+            card_cands: ArrayVec::new(),
             last_hits: 0,
             chance: None,
         }
@@ -1344,6 +1350,11 @@ impl Battle {
                 }
             }
         }
+    }
+
+    /// a side has no Pokemon left: the battle is decided even before check_win runs
+    fn side_out(&self) -> bool {
+        self.sides[0].alive_count() == 0 || self.sides[1].alive_count() == 0
     }
 
     fn check_win(&mut self) {
@@ -4721,8 +4732,18 @@ impl Battle {
         for _ in 0..std::mem::take(&mut self.deferred_kos) {
             self.ko_boost(dex, s, i);
         }
+        self.card_defer = posts.len() > 1 && self.red_card.is_none();
+        self.card_cands.clear();
         for &(ts, ti, hit_sub) in &posts {
             self.after_hit(dex, s, i, mv, ts, ti, hit_sub);
+        }
+        self.card_defer = false;
+        let mut cc = std::mem::take(&mut self.card_cands);
+        if cc.len() > 1 {
+            self.sort_by_speed(dex, &mut cc);
+        }
+        if let Some(&(ts, ti)) = cc.iter().find(|&&(ts, ti)| self.mon(ts, ti).alive() && self.mon(ts, ti).item == It::RedCard) {
+            self.red_card = Some((ts as u8, ti as u8));
         }
         // Eject Button (AfterMoveSecondary): the fastest holder hit goes first (Trick Room reverses, ties random); once one
         // Pokemon has its switchFlag the others keep their buttons
@@ -4787,7 +4808,8 @@ impl Battle {
             self.mon_mut(s, i).vol |= vol::GLAIVE_RUSH;
         }
         if hit_any && self.mon(s, i).alive() && !self.self_dropped {
-            if let Some(b) = mv.self_boosts {
+            // no self stat change once the hit decided the battle; recoil still happens
+            if let Some(b) = mv.self_boosts.filter(|_| !self.side_out()) {
                 let times = if self.parental { self.last_hits.clamp(1, 2) } else { 1 };
                 for _ in 0..times {
                     self.boost(dex, s, i, &b, Some((s, i)), false);
@@ -5706,7 +5728,8 @@ impl Battle {
     /// move: move.selfDropped) BEFORE the targets' DamagingHit reactions: Malamar's Contrary Superpower into a Wandering Spirit
     /// Tinkaton gives +1/+1, then the abilities swap. Parental Bond keeps the per-hit drops at the end of the move.
     fn early_self_drops(&mut self, dex: &Dex, s: usize, i: usize, mv: &MoveData) {
-        if self.self_dropped || self.parental || !self.mon(s, i).alive() {
+        // no self stat change once the hit decided the battle (Showdown: the battle has ended)
+        if self.self_dropped || self.parental || !self.mon(s, i).alive() || self.side_out() {
             return;
         }
         if let Some(b) = mv.self_boosts {
@@ -5916,7 +5939,11 @@ impl Battle {
         // (a holder this move drags out has its forceSwitchFlag set: Showdown's Red Card then does nothing)
         let dragging = mv.force_switch && not_self && !self.drag_blocked(s, i, ts, ti) && self.sides[ts].bench().next().is_some();
         if not_self && !hit_sub && !dragging && self.mon(ts, ti).alive() && card_before && self.mon(ts, ti).item == It::RedCard && self.red_card.is_none() {   // (a Substitute took the hit: no Red Card)
-            self.red_card = Some((ts as u8, ti as u8));
+            if self.card_defer {
+                self.card_cands.push((ts, ti));
+            } else {
+                self.red_card = Some((ts as u8, ti as u8));
+            }
         }
         if self.mon(ts, ti).alive() && !hit_sub {   // (a Substitute took the hit: Dragon Tail / Circle Throw drag nothing)
             if mv.force_switch && not_self && !self.drag_blocked(s, i, ts, ti) {
