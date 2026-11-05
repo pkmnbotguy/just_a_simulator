@@ -60,6 +60,7 @@ function applyCall(battle, name, args, kw) {
 			return;
 		}
 		if (kw.hp_frac !== undefined) p.hp = Math.max(1, Math.floor(p.maxhp * kw.hp_frac));
+		if (kw.hp !== undefined) p.hp = Math.max(1, Math.min(p.maxhp, kw.hp));      // (2026-11-05, situation.py) absolute HP
 		if (kw.status) {
 			// by hand: setStatus refuses bench Pokemon. The condition's own onStart still runs (sleep length, toxic stage)
 			p.status = kw.status;
@@ -71,6 +72,10 @@ function applyCall(battle, name, args, kw) {
 		if (kw.boosts) for (const [k, v] of Object.entries(kw.boosts)) p.boosts[k] = v;
 		if (kw.first_turn !== undefined) { p.activeMoveActions = kw.first_turn ? 0 : 2; }   // (vgcsim's first_turn is Fake Out's flag only; activeTurns stays 1 for everyone)
 		if (kw.item === '') { p.item = ''; p.itemState = {id: '', target: p}; }
+		// (2026-11-05, situation.py) a different held item, silently (no onStart: as vgcsim's set_mon)
+		else if (kw.item) { const it = battle.dex.items.get(kw.item); if (!it.exists) throw new Error('unknown item ' + kw.item); p.item = it.id; p.itemState = {id: it.id, target: p}; }
+		if (kw.pp_used) kw.pp_used.forEach((u, k) => { if (p.moveSlots[k]) p.moveSlots[k].pp = Math.max(0, p.moveSlots[k].maxpp - u); });
+		if (kw.protect_streak !== undefined && kw.protect_streak > 0) { p.addVolatile('stall'); p.volatiles['stall'].counter = Math.pow(3, kw.protect_streak); }
 		// (2026-10-17) already Mega Evolved (vgcsim set_mega_form / the exact engine's set_mon(mega)): the form, its ability and
 		// stats, the side's Mega used up; the new ability's Start does NOT run (no switch-in effects in these positions)
 		if (kw.mega && p.canMegaEvo) {
@@ -106,9 +111,30 @@ function applyCall(battle, name, args, kw) {
 	} else if (name === 'set_side') {
 		const side = battle.sides[args[0]];
 		const src = side.active[0];
-		for (const [k, id] of [['tailwind', 'tailwind'], ['reflect', 'reflect'], ['light_screen', 'lightscreen']]) {
+		for (const [k, id] of [['tailwind', 'tailwind'], ['reflect', 'reflect'], ['light_screen', 'lightscreen'], ['aurora_veil', 'auroraveil']]) {
 			if (kw[k]) { side.addSideCondition(id, src); side.sideConditions[id].duration = kw[k]; }
 		}
+		// (2026-11-05, situation.py) entry hazards and the Mega flag
+		if (kw.stealth_rock) side.addSideCondition('stealthrock', src);
+		if (kw.sticky_web) side.addSideCondition('stickyweb', src);
+		for (const [k, id] of [['spikes', 'spikes'], ['toxic_spikes', 'toxicspikes']]) {
+			for (let n = 0; n < (kw[k] || 0); n++) side.addSideCondition(id, src);
+		}
+		if (kw.mega_used) for (const q of side.pokemon) q.canMegaEvo = false;
+	} else if (name === 'set_extra') {
+		// (2026-11-05, situation.py) Safeguard (on side args[0]) and Gravity / Magic Room / Wonder Room / Fairy Lock
+		const side = battle.sides[args[0]];
+		const src = side.active[0];
+		if (kw.safeguard) { side.addSideCondition('safeguard', src); side.sideConditions['safeguard'].duration = kw.safeguard; }
+		for (const [k, id] of [['gravity', 'gravity'], ['magic_room', 'magicroom'], ['wonder_room', 'wonderroom'], ['fairy_lock', 'fairylock']]) {
+			if (kw[k]) { battle.field.addPseudoWeather(id, src); battle.field.pseudoWeather[id].duration = kw[k]; }
+		}
+	} else if (name === 'set_ability') {
+		// (2026-11-05, situation.py) the current ability, silently (no start effects: as vgcsim's set_ability)
+		const p = mon(battle, args[0], args[1]);
+		const ab = battle.dex.abilities.get(kw.ability);
+		if (!ab.exists) throw new Error('unknown ability ' + kw.ability);
+		p.ability = ab.id; p.abilityState = {id: ab.id, target: p};
 	} else {
 		throw new Error('unknown call ' + name);
 	}

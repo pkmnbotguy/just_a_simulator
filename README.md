@@ -89,6 +89,32 @@ Actions are tuples:
 - `("switch", index, 0, False)`;
 - `("pass", 0, 0, False)`.
 
+## Setting up your own situations
+
+To test a specific position, write it as a small text file (both sides' Pokemon, the setup, the turns to play) and run
+it with `situation.py`:
+
+```
+[p1]
+<Showdown export; the first two are on the field>
+[p2]
+...
+[setup]
+p1a hp 40%, status par, boost atk +2
+p2 reflect 5, stealthrock
+weather rain 3
+[turns]
+p1: Earthquake, Protect | p2: Moonblast p1a, switch Incineroar
+```
+
+```
+python situation.py examples/situations/rain_spread.txt               # engine: logs + outcome summary
+python situation.py my.txt --showdown ../pokemon-showdown              # also play it in real Showdown and compare
+```
+
+The format, every setting, and the Python API are in [docs/situations.md](docs/situations.md). A situation file is also
+the easiest way to report a bug: it is everything needed to reproduce it.
+
 ## Verification
 
 What "matches Showdown" means here, and how to check it yourself. Details are in

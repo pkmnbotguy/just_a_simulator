@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.2 (2026-11-05)
+
+- `situation.py` + [docs/situations.md](docs/situations.md): set up a battle situation of your own in a small text file
+  (both sides' Pokemon, HP / status / stat stages / items / abilities / Mega, weather, terrain, Trick Room, screens,
+  hazards..., then scripted turns with moves, targets, switches and replacements), play it many times in the engine
+  (named logs + an outcome summary), and with `--showdown` play the same situation in real Showdown and compare.
+  Examples in `examples/situations/`.
+- `tools/showdown_truth.js` mirrors more setup: exact HP, any held item, PP used, Protect streak, current ability, Aurora
+  Veil, entry hazards, Safeguard, Gravity, Magic Room, Wonder Room, Fairy Lock, Mega already used.
+
 ## 0.1.1 (2026-11-05)
 
 Fixes from a report by another bot maker (thanks!):
